@@ -1,3 +1,9 @@
 TO DO:
 
+* Add configuration via Config::Items, so a .rcfile and command
+  line options work out of the box
+* Add configuration item for the Growl target
+* Add configuration item for the FritzBox
+* Add phone reverse lookup to show real names
+
 0.01 to be released
