@@ -100,6 +100,7 @@ sub setup_readline {
 # Disconnect: datum;DISCONNECT;ConnectionID;dauerInSekunden;
 sub dispatch_line {
     my ($self, $handle, $payload) = @_;
+    $payload =~ s/\s+$//;
     return unless $payload;
     #warn "<<$payload>>";
     my @info = split /;/, $payload;
