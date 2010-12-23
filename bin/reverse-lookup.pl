@@ -1,7 +1,7 @@
 #!perl -w
 use strict;
 use AnyEvent;
-use AnyEvent::CIDReverseLookup;
+use Phone::CIDReverseLookup;
 use Data::Dumper;
 
 my $found = AnyEvent->condvar;
@@ -9,7 +9,7 @@ my $found = AnyEvent->condvar;
 my $implicit_local_prefix = '69';
 my $implicit_country_prefix = '+49';
 
-my $l = AnyEvent::CIDReverseLookup->new(
+my $l = Phone::CIDReverseLookup->new(
     #engines => ['klicktel'],
 );
 my @results;
@@ -23,22 +23,25 @@ for my $number (@ARGV) {
     $found->begin(sub { shift->send(\@results) });
 
     $l->lookup(
+        {
+            on_found => sub {
+                my ($info) = @_;
+                push @results, "$info->{search}->{number} => $info->{result}\n";
+                $found->end();
+            },
+            on_notfound => sub {
+                my ($info) = @_;
+                push @results, "$info->{search}->{number} <unknown>\n";
+                $found->end;
+            },
+            on_timeout => sub {
+                my ($info) = @_;
+                push @results, "$info->{search}->{number} <unknown>\n";
+                $found->end;
+            },
+            on_progress => sub { warn $_[1] },
+        },
         number => $number,
-        on_found => sub {
-            my ($info) = @_;
-            push @results, "$info->{number} => $info->{name}\n";
-            $found->end();
-        },
-        on_notfound => sub {
-            my ($info) = @_;
-            push @results, "$info->{number} <unknown>\n";
-            $found->end;
-        },
-        on_timeout => sub {
-            my ($info) = @_;
-            push @results, "$info->{number} <unknown>\n";
-            $found->end;
-        },
     );
 };
 
