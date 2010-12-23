@@ -39,7 +39,7 @@ for my $number (@ARGV) {
                 push @results, "$info->{search}->{number} <unknown>\n";
                 $found->end;
             },
-            on_progress => sub { warn $_[1] },
+            #on_progress => sub { warn $_[1] },
         },
         number => $number,
     );
