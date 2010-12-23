@@ -37,6 +37,22 @@ Example:
 
   fritzbox 'fritz.box';
 
+=head2 C<< growl_to HOST >>
+
+=for config
+    repeat  => 1,
+    default => 'localhost',
+
+Target hostname/IP address 
+
+Specifies the hostname or IP address of the machine
+that will listen for Growl messages. Defaults to the same machine
+that this program is run on.
+
+Example:
+
+  growl_to 'my_desk';
+
 =head2 C<< filter NUMBER >>
 
 Local number filter
@@ -56,6 +72,25 @@ May appear only once.
 =for config
     repeat  => 1,
     default => '',
+
+=head2 C<< countrycode >>
+
+=for config
+    repeat  => 1,
+    default => '+49',
+
+The implicit country code, for incoming numbers without it.
+The default is C<+49>, for Germany.
+
+=head2 C<< areacode >>
+
+=for config
+    repeat  => 1,
+    default => '69',
+
+The implicit area code, for incoming numbers without it,
+without a leading zero.
+The default is C<69>, for Frankfurt.
 
 =cut
 
