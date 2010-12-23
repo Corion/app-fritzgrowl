@@ -4,6 +4,12 @@ TO DO:
   line options work out of the box
 * Add configuration item for the Growl target
 * Add configuration item for the FritzBox
-* Add phone reverse lookup to show real names
+* Consider adding CSS selector scraping in addition to XPath scraping
+* Make reverse lookup testable through canned files
+* Consider reading the country code / area code config from the Fritz!Box
+  (would need a password for the FB)
+* Consider moving all the URLs+country codes into a config file instead
+  of keeping them in the module
 
 0.01 to be released
+  . Phone reverse lookup to show real names in AnyEvent::CIDReverseLookup
