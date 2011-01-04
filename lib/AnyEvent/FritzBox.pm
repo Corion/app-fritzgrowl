@@ -5,6 +5,7 @@ use AnyEvent;
 use AnyEvent::Socket;
 use AnyEvent::Handle;
 use Data::Dumper;
+use Scalar::Util qw(weaken);
 
 # Dial C<#96*5*> to enable the TCP call monitor
 
@@ -30,6 +31,8 @@ sub new {
     $args{ on_call } ||= sub {};
     $args{ on_ring } ||= sub {};
     $args{ on_disconnect } ||= sub {};
+    $args{ max_retries } ||= 10; # We always give up after 10 attempts to connect
+    $args{ reconnect_cooldown } ||= 1; # Start value for the exponential falloff
     
     my $self = bless \%args => $class;
     my $s = $self;
@@ -48,22 +51,11 @@ sub new {
            if $s->{on_connect};
     });
     
-    if (! $args{ handle }) {
-        $args{ host } ||= 'fritz.box';
-        $args{ port } ||= 1012;
+    if (! $self->{ handle }) {
+        $self->{ host } ||= 'fritz.box';
+        $self->{ port } ||= 1012;
         
-        tcp_connect $args{ host }, $args{ port }, sub {
-            my ($fh) = @_
-                or die "Couldn't connect to $self->{host}:$self->{port}: $!";
-            $self->{handle} = AnyEvent::Handle->new(
-                fh => $fh,
-                on_error => sub {
-                    warn __PACKAGE__ . " error: $_[2]";
-                    $_[0]->destroy;
-                },
-            );
-            $have_handle->send();
-        };
+        $self->connect( $self->{host}, $self->{port}, $have_handle);
     } else {        
         #$self->{ handle }->stop_read;
         $have_handle->send();
@@ -93,6 +85,51 @@ sub setup_readline {
     });
 };
 
+sub connect {
+    my ($self,$host,$port,$connected) = @_;
+    tcp_connect $host, $port, sub {
+        my ($fh) = @_;
+        undef $self->{reconnect};
+        if (! $fh) {
+            #warn "Couldn't connect to $args{ host }:$args{ port }: $!";
+            return;
+        };
+        $self->{current_reconnect_timeout} = 0;
+        $self->{handle} = $self->setup_handle($fh);
+        $self->{retried} = 0; # we got a connection
+        $connected->send();
+    };    
+};
+
+sub setup_handle {
+    my ($s,$fh) = @_;
+    weaken $s; # Create a weak self-ref for the closure
+    $s->{handle} = AnyEvent::Handle->new(
+        fh => $fh,
+        on_error => sub {
+            warn __PACKAGE__ . " error: $_[2]";
+            $_[0]->destroy;
+            # Try to reconnect here, after some timeout
+            if ($s) {
+                if ($s->{retried} >= $s->{max_retries}) {
+                    # Well, somebody could hear this, somewhere
+                    die "Maximum retries ($s->{max_retries}) reached trying to connect to $s->{host}:$s->{port}";
+                };
+                if (! $s->{reconnect} and $s->{retried}++ < $s->{max_retries}) {
+                    $s->{current_reconnect_cooldown} = (($s->{current_reconnect_cooldown}||0) * 2)
+                                                       || $s->{reconnect_cooldown};
+                    warn "Reconnecting in $s->{current_reconnect_cooldown} seconds";
+                    $s->{reconnect} ||= AnyEvent->timer(after => $s->{current_reconnect_cooldown}+rand(5), cb => sub {
+                        warn "Reconnecting to $s->{host}:$s->{port}";
+                        my $connected = AnyEvent->condvar();
+                        $connected->cb(sub { warn "Reconnected" });
+                        $s->connect($s->{host}, $s->{port}, $connected);
+                    });
+                };
+            };
+        },
+    );
+};
 
 # Outbound calls: datum;CALL;ConnectionID;Nebenstelle;GenutzteNummer;AngerufeneNummer;
 # Inbound calls: datum;RING;ConnectionID;Anrufer-Nr;Angerufene-Nummer;
