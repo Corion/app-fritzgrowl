@@ -5,7 +5,7 @@ use AnyEvent;
 use AnyEvent::Socket;
 use AnyEvent::Handle;
 use Data::Dumper;
-use Scalar::Util qw(weaken);
+use Scalar::Util qw(weaken blessed);
 
 # Dial C<#96*5*> to enable the TCP call monitor
 
@@ -33,12 +33,15 @@ sub new {
     $args{ on_disconnect } ||= sub {};
     $args{ max_retries } ||= 10; # We always give up after 10 attempts to connect
     $args{ reconnect_cooldown } ||= 1; # Start value for the exponential falloff
+    if ($args{ log } && !ref $args{ log }) {
+        $args{ log } = sub { print "@_\n" };
+    };
     
     my $self = bless \%args => $class;
     my $s = $self;
     my $connected = AnyEvent->condvar;
     my $have_handle = AnyEvent->condvar(cb => sub {
-        $s->setup_readline();
+        $s->setup_handle($self->{ handle });
         #warn "Signalling we're done";
         $connected->send() if $connected;
         
@@ -57,7 +60,6 @@ sub new {
         
         $self->connect( $self->{host}, $self->{port}, $have_handle);
     } else {        
-        #$self->{ handle }->stop_read;
         $have_handle->send();
     };
     
@@ -68,21 +70,14 @@ sub new {
         #$self->{ handle }->start_read;# done anyway by the ->push_read
     };
     undef $connected; # clean up stuff held by closure
-    #warn "Constructed";
 
     $self
 };
 
-sub setup_readline {
-    my ($self) = @_;
-    #warn "Setting up handle for $self";
-    $self->{ handle }->on_read(sub {
-        my $h = $_[0];
-        $h->push_read( line => sub {
-            #warn "READ: @_";
-            $self->dispatch_line(@_);
-        });
-    });
+sub log {
+    my $s = shift;
+    my $l = $s->{log};
+    goto &$l if $l;
 };
 
 sub connect {
@@ -95,35 +90,48 @@ sub connect {
             return;
         };
         $self->{current_reconnect_timeout} = 0;
-        $self->{handle} = $self->setup_handle($fh);
+        $self->setup_handle($fh);
         $self->{retried} = 0; # we got a connection
         $connected->send();
     };    
 };
 
 sub setup_handle {
-    my ($s,$fh) = @_;
-    weaken $s; # Create a weak self-ref for the closure
-    $s->{handle} = AnyEvent::Handle->new(
-        fh => $fh,
-        on_error => sub {
-            warn __PACKAGE__ . " error: $_[2]";
+    my ($self,$fh) = @_;
+    if (not(blessed $fh and $fh->isa('AnyEvent::Handle'))) {
+        $fh = AnyEvent::Handle->new(
+            fh => $fh,
+        );
+    };
+    $self->{handle} = $fh;
+    
+    $self->{ handle }->on_read(sub {
+        my $h = $_[0];
+        $h->push_read( line => sub {
+            #warn "READ: @_";
+            $self->dispatch_line(@_);
+        });
+    });
+    
+    #weaken $self;
+    $self->{ handle }->on_error(sub {
+            #warn "[" . __PACKAGE__ . "] socket error: $_[2]";
             $_[0]->destroy;
             # Try to reconnect here, after some timeout
-            if ($s) {
-                if ($s->{retried} >= $s->{max_retries}) {
+            if ($self) {
+                if (($self->{retried}||0) >= $self->{max_retries}) {
                     # Well, somebody could hear this, somewhere
-                    die "Maximum retries ($s->{max_retries}) reached trying to connect to $s->{host}:$s->{port}";
+                    die "Maximum retries ($self->{max_retries}) reached trying to connect to $self->{host}:$self->{port}";
                 };
-                if (! $s->{reconnect} and $s->{retried}++ < $s->{max_retries}) {
-                    $s->{current_reconnect_cooldown} = (($s->{current_reconnect_cooldown}||0) * 2)
-                                                       || $s->{reconnect_cooldown};
-                    warn "Reconnecting in $s->{current_reconnect_cooldown} seconds";
-                    $s->{reconnect} ||= AnyEvent->timer(after => $s->{current_reconnect_cooldown}+rand(5), cb => sub {
-                        warn "Reconnecting to $s->{host}:$s->{port}";
+                if (! $self->{reconnect} and $self->{retried}++ < $self->{max_retries}) {
+                    $self->{current_reconnect_cooldown} = (($self->{current_reconnect_cooldown}||0) * 2)
+                                                       || $self->{reconnect_cooldown};
+                    $self->log( "Reconnecting in $self->{current_reconnect_cooldown} seconds" );
+                    $self->{reconnect} ||= AnyEvent->timer(after => $self->{current_reconnect_cooldown}+rand(5), cb => sub {
+                        $self->log( "Reconnecting to $self->{host}:$self->{port}" );
                         my $connected = AnyEvent->condvar();
-                        $connected->cb(sub { warn "Reconnected" });
-                        $s->connect($s->{host}, $s->{port}, $connected);
+                        $connected->cb(sub { $self->log( "Reconnected" )} );
+                        $self->connect($self->{host}, $self->{port}, $connected);
                     });
                 };
             };
