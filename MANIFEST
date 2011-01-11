@@ -1,0 +1,17 @@
+.gitignore
+bin/fritz-growl.pl
+bin/reverse-lookup.pl
+Changes
+lib/AnyEvent/FritzBox.pm
+lib/App/FritzGrowl.pm
+lib/App/FritzGrowl/Config/Items.pm
+lib/Config/Handler/DSL.pm
+lib/Config/Handler/Getopt.pm
+lib/HTTP/FirstResponse.pm
+lib/Phone/CIDReverseLookup.pm
+Makefile.PL
+MANIFEST			This list of files
+MANIFEST.skip
+t/01-anyevent-fritzgrowl-breakdown.t
+t/01-anyevent-fritzgrowl-new.t
+t/01-anyevent-fritzgrowl-ring.t
