@@ -86,7 +86,8 @@ sub connect {
         my ($fh) = @_;
         undef $self->{reconnect};
         if (! $fh) {
-            #warn "Couldn't connect to $args{ host }:$args{ port }: $!";
+            $self->{log}->("Couldn't connect to $host:$port: $!");
+            $self->timed_reconnect($host,$port); # launch reconnect timer
             return;
         };
         $self->{current_reconnect_timeout} = 0;
@@ -94,6 +95,21 @@ sub connect {
         $self->{retried} = 0; # we got a connection
         $connected->send();
     };    
+};
+
+sub timed_reconnect {
+    my ($self,$host,$port) = @_;
+    if (! $self->{reconnect} and $self->{retried}++ < $self->{max_retries}) {
+        $self->{current_reconnect_cooldown} = (($self->{current_reconnect_cooldown}||0) * 2)
+                                           || $self->{reconnect_cooldown};
+        $self->log( "Reconnecting in $self->{current_reconnect_cooldown} seconds" );
+        $self->{reconnect} ||= AnyEvent->timer(after => $self->{current_reconnect_cooldown}+rand(5), cb => sub {
+            $self->log( "Reconnecting to $self->{host}:$self->{port}" );
+            my $connected = AnyEvent->condvar();
+            $connected->cb(sub { $self->log( "Reconnected" )} );
+            $self->connect($host, $port, $connected);
+        });
+    };
 };
 
 sub setup_handle {
@@ -123,17 +139,7 @@ sub setup_handle {
                     # Well, somebody could hear this, somewhere
                     die "Maximum retries ($self->{max_retries}) reached trying to connect to $self->{host}:$self->{port}";
                 };
-                if (! $self->{reconnect} and $self->{retried}++ < $self->{max_retries}) {
-                    $self->{current_reconnect_cooldown} = (($self->{current_reconnect_cooldown}||0) * 2)
-                                                       || $self->{reconnect_cooldown};
-                    $self->log( "Reconnecting in $self->{current_reconnect_cooldown} seconds" );
-                    $self->{reconnect} ||= AnyEvent->timer(after => $self->{current_reconnect_cooldown}+rand(5), cb => sub {
-                        $self->log( "Reconnecting to $self->{host}:$self->{port}" );
-                        my $connected = AnyEvent->condvar();
-                        $connected->cb(sub { $self->log( "Reconnected" )} );
-                        $self->connect($self->{host}, $self->{port}, $connected);
-                    });
-                };
+                $self->timed_reconnect($self->{host}, $self->{port});
             };
         },
     );
