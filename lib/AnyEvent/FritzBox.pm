@@ -32,7 +32,7 @@ sub new {
     $args{ on_ring } ||= sub {};
     $args{ on_disconnect } ||= sub {};
     $args{ max_retries } ||= 10; # We always give up after 10 attempts to connect
-    $args{ reconnect_cooldown } ||= 1; # Start value for the exponential falloff
+    $args{ reconnect_cooldown } ||= 2; # Start value for the exponential falloff
     if ($args{ log } && !ref $args{ log }) {
         $args{ log } = sub { print "@_\n" };
     };
