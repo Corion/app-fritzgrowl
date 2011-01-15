@@ -66,6 +66,7 @@ sub lookup_number {
 
 my $fb = AnyEvent::FritzBox->new(
     host => $host,
+    log => 1,
     on_ring => sub {
         my ($fb,%args) = @_;
         if ($args{ local_number } =~ /$local_filter/) {
