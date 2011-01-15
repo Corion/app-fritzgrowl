@@ -18,10 +18,6 @@ if (! defined $local_filter) {
 };
 $local_filter = qr/$local_filter/;
 
-# some local default, until I get the universal
-# config going
-$host ||= '192.168.1.104';
-
 sub lookup_number {
     my $found = AnyEvent->condvar;
 
