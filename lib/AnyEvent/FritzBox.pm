@@ -31,7 +31,6 @@ sub new {
     $args{ on_call } ||= sub {};
     $args{ on_ring } ||= sub {};
     $args{ on_disconnect } ||= sub {};
-    $args{ on_connect_fail } ||= sub {};
     $args{ max_retries } ||= 10; # We always give up after 10 attempts to connect
     $args{ reconnect_cooldown } ||= 2; # Start value for the exponential falloff
 
@@ -70,8 +69,11 @@ sub new {
     # We are synchronous here in case there is no continuation passed in
     if ($self->{synchronous} or not $self->{on_connect}) {
         #warn "Waiting for connection";
+        $args{ on_connect_fail } = sub { undef $self; $connected->send; };
         $connected->recv;
         #$self->{ handle }->start_read;# done anyway by the ->push_read
+    } else {
+        $args{ on_connect_fail } = sub {};
     };
     undef $connected; # clean up stuff held by closure
 
