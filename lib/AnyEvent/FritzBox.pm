@@ -31,8 +31,12 @@ sub new {
     $args{ on_call } ||= sub {};
     $args{ on_ring } ||= sub {};
     $args{ on_disconnect } ||= sub {};
+    $args{ on_connect_fail } ||= sub {};
     $args{ max_retries } ||= 10; # We always give up after 10 attempts to connect
     $args{ reconnect_cooldown } ||= 2; # Start value for the exponential falloff
+
+    $args{ current_reconnect } = undef; # we are not (yet) reconnecting
+    
     if ($args{ log } && !ref $args{ log }) {
         $args{ log } = sub { print "@_\n" };
     };
@@ -82,33 +86,49 @@ sub log {
 
 sub connect {
     my ($self,$host,$port,$connected) = @_;
-    tcp_connect $host, $port, sub {
+    if(! tcp_connect $host, $port, sub {
         my ($fh) = @_;
-        undef $self->{reconnect};
         if (! $fh) {
-            $self->{log}->("Couldn't connect to $host:$port: $!");
-            $self->timed_reconnect($host,$port); # launch reconnect timer
+            $self->log("Couldn't connect to $host:$port");
+            $self->timed_reconnect($host,$port,$connected); # launch reconnect timer
             return;
         };
-        $self->{current_reconnect_timeout} = 0;
+        # we got a connection, reset our retry counters
+        $self->{current_reconnect} = undef;
         $self->setup_handle($fh);
-        $self->{retried} = 0; # we got a connection
+        
         $connected->send();
-    };    
+    }) {
+        $self->log("Connect to $host:$port failed: $!");
+        $self->timed_reconnect( $host, $port, $connected );
+    };
 };
 
 sub timed_reconnect {
     my ($self,$host,$port) = @_;
-    if (! $self->{reconnect} and $self->{retried}++ < $self->{max_retries}) {
-        $self->{current_reconnect_cooldown} = (($self->{current_reconnect_cooldown}||0) * 2)
-                                           || $self->{reconnect_cooldown};
-        $self->log( "Reconnecting in $self->{current_reconnect_cooldown} seconds" );
-        $self->{reconnect} ||= AnyEvent->timer(after => $self->{current_reconnect_cooldown}+rand(5), cb => sub {
-            $self->log( "Reconnecting to $self->{host}:$self->{port}" );
-            my $connected = AnyEvent->condvar();
-            $connected->cb(sub { $self->log( "Reconnected" )} );
-            $self->connect($host, $port, $connected);
-        });
+    if (! $self->{current_reconnect}->{timer}) {
+        if ($self->{current_reconnect}->{retried}++ < $self->{max_retries}) {
+            # We add a fuzz delay of up to 2 seconds to prevent stampeding herds
+            my $cooldown = $self->{reconnect_cooldown} ** $self->{current_reconnect}->{retried}
+                         + rand(2);
+            
+            #$self->log( Dumper $self->{ current_reconnect });
+            $self->log( "Reconnecting in $cooldown seconds" );
+            
+            $self->{current_reconnect}->{timer} ||= AnyEvent->timer(after => $cooldown, cb => sub {
+                $self->log( "Reconnecting to $host:$port" );
+                
+                # Tell ourselves that our callback triggered
+                delete $self->{current_reconnect}->{timer};
+                my $connected = AnyEvent->condvar();
+                $connected->cb(sub { $self->log( "Reconnected" )} );
+                $self->connect($host, $port, $connected);
+            });
+        } else {
+            $self->log("Maximum number of reconnects reached");
+            $self->{on_connect_fail}->($host,$port);
+            #die "No connection to $host:$port after $self->{max_retries}";
+        };
     };
 };
 
@@ -131,24 +151,24 @@ sub setup_handle {
     
     #weaken $self;
     $self->{ handle }->on_error(sub {
-            #warn "[" . __PACKAGE__ . "] socket error: $_[2]";
-            $_[0]->destroy;
-            # Try to reconnect here, after some timeout
-            if ($self) {
-                if (($self->{retried}||0) >= $self->{max_retries}) {
-                    # Well, somebody could hear this, somewhere
-                    die "Maximum retries ($self->{max_retries}) reached trying to connect to $self->{host}:$self->{port}";
-                };
-                $self->timed_reconnect($self->{host}, $self->{port});
+        #warn "[" . __PACKAGE__ . "] socket error: $_[2]";
+        $_[0]->destroy;
+        # Try to reconnect here, after some timeout
+        if ($self) {
+            if ($self->{current_reconnect} && 
+                $self->{current_reconnect}->{retried} >= $self->{max_retries}) {
+                # Well, somebody could hear this, somewhere
+                die "Maximum retries ($self->{max_retries}) reached trying to connect to $self->{host}:$self->{port}";
             };
-        },
-    );
+            $self->timed_reconnect($self->{host}, $self->{port});
+        };
+    });
 };
 
-# Outbound calls: datum;CALL;ConnectionID;Nebenstelle;GenutzteNummer;AngerufeneNummer;
-# Inbound calls: datum;RING;ConnectionID;Anrufer-Nr;Angerufene-Nummer;
-# Connect: datum;CONNECT;ConnectionID;Nebenstelle;Nummer;
-# Disconnect: datum;DISCONNECT;ConnectionID;dauerInSekunden;
+# Outbound calls: datum;CALL;ConnectionID;LocalExtension;usedNumber;calledNumber;
+# Inbound calls: datum;RING;ConnectionID;callerId;localNumber;
+# Connect: datum;CONNECT;ConnectionID;LocalExtension;Number;
+# Disconnect: datum;DISCONNECT;ConnectionID;durationInSeconds;
 sub dispatch_line {
     my ($self, $handle, $payload) = @_;
     $payload =~ s/\s+$//;
