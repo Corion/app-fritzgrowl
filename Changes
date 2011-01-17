@@ -10,6 +10,7 @@ TO DO:
   (would need a password for the FB)
 * Consider moving all the URLs+country codes into a config file instead
   of keeping them in the module
+* Move reconnect logic into "exponential falloff" module
 
 0.01 to be released
   . Phone reverse lookup to show real names in AnyEvent::CIDReverseLookup
